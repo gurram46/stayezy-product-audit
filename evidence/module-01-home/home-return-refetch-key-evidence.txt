@@ -1,0 +1,33 @@
+Module 01 — Home return/refetch key evidence
+Source: filtered Flutter logcat from physical Motorola Edge 40, app 1.1.0, anonymous session, 2026-09-02.
+
+Reproduction A
+18:44:23.796 Listingdetials -> NewDashboardScreen
+18:44:23.830 provider>>>>>>>null
+18:44:24.051 Map API GET /api/get-allProperty-test?...zoom=12
+18:44:24.725 API URL: https://admin.stayezy.co/api/home-data?page=1&type
+18:44:25.138 {status: false, message: Unauthorized Token}
+18:44:25.376 Map API response 200, total_properties: 300
+18:44:26.438 Map API properties loaded: 300
+18:44:26.438 TOTAL API TIME: 812 ms
+18:44:28.683 Data already available - API not calling
+
+Reproduction B
+18:44:39.515 Listingdetials -> NewDashboardScreen
+18:44:39.569 provider>>>>>>>null
+18:44:39.708 Map API GET /api/get-allProperty-test?...zoom=12
+18:44:40.286 API URL: https://admin.stayezy.co/api/home-data?page=1&type
+18:44:40.675 {status: false, message: Unauthorized Token}
+18:44:41.504 addPropertyGetData API TIME: 1230 ms
+18:44:41.679 API TIME: 1393 ms
+18:44:41.744 TOTAL API TIME: 1458 ms
+18:44:41.744 _initializeData completed
+
+Interpretation
+- Returning from a property-details route to NewDashboardScreen does not merely repaint the previous Home view.
+- In two reproductions, the dashboard path is re-entered with provider logged as null and it restarts dashboard initialization work.
+- Both the Map property endpoint and the Home data endpoint are called again after Back.
+- The Map endpoint again asks for/fetches the 300-property dataset despite the user returning to Home, not selecting Map.
+- The anonymous unauthorized-token request is also repeated.
+- This network/state reinitialization is consistent with the visible skeleton/reload observed on Back navigation.
+- Source inspection is still required to determine whether the dashboard route/widget is recreated, provider scope is lost, or initialization is explicitly rerun on route resume.
