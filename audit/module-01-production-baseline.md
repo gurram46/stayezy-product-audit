@@ -97,6 +97,18 @@ This occurs many times during the Home-page session and persists well after init
 
 **Current severity:** P1/P2 candidate because it is directly correlated with user-visible jank and repeats continuously.
 
+#### Idle Home confirmation — 16:27 IST
+
+A third run was captured with the user leaving the Home screen untouched after launch. This substantially strengthens H-003:
+
+- startup reports `Skipped 72 frames! The application may be doing too much work on its main thread.`;
+- `GoogleMapController.onCreate` and Flutter `PlatformViewsController` creation occur immediately after navigation to `NewDashboardScreen`, confirming that a Google Maps platform view is actually constructed even though the visible tab is Home;
+- the Map API is called immediately and later reports `Map API properties loaded: 300`;
+- the first `BLASTBufferQueue ... Can't acquire next buffer` burst begins around `16:27:12.439`;
+- the same error continues in repeated bursts while the screen is idle and is still present around `16:28:43.562` — at least ~91 seconds after the first observed buffer exhaustion in this run.
+
+**Interpretation:** this is no longer an interaction-only or screen-recording-only symptom. The rendering surface continues hitting buffer exhaustion while the user is not scrolling or touching the screen. Off-screen Map initialization is now confirmed; whether that platform view is the direct cause of the BLAST failures still requires code-level verification or an A/B build where the Map view is lazily mounted.
+
 ### Finding H-004 — Anonymous analytics initialization throws a plugin exception
 
 During an anonymous launch, Mixpanel attempts identification with no user ID and logs:
@@ -153,7 +165,7 @@ The Play-installed production build logs detailed analytics payloads and runtime
 ## Immediate codebase checks once repository access is available
 
 1. Inspect the bottom-navigation/dashboard widget tree and verify whether the Map tab/`GoogleMap` is constructed and rendering while Home is active.
-2. Profile startup work on the Flutter main isolate and identify what is executed before/around the two `Choreographer` skipped-frame bursts.
+2. Profile startup work on the Flutter main isolate and identify what is executed before/around the `Choreographer` skipped-frame bursts.
 3. Trace anonymous analytics initialization and remove the null Mixpanel `identify` path.
 4. Identify the anonymous request returning `Unauthorized Token` and avoid making it when unauthenticated if it is not required.
 5. Inspect why 300 map properties are fetched during Home startup and whether the Map module can be lazy-initialized only when the user opens Map.
@@ -168,3 +180,4 @@ The Play-installed production build logs detailed analytics payloads and runtime
 - `Screen_recording_20260902_160212.mp4`.
 - First broad logcat capture.
 - Clean Stayezy-process logcat capture (`stayezy-home-clean-log.txt`) retained outside the public repo unless redacted.
+- Idle Home Stayezy-process logcat capture (`stayezy-home-idle-log.txt`) retained outside the public repo unless redacted.
