@@ -32,19 +32,19 @@ The user independently reported visible residual lag. This confirms the cold flo
 
 ## Finding PD-007 — Property video viewer has no dedicated visible close/back control
 
-### Visual reproduction
+### Visual and physical-device reproduction
 
 On the Dreamland farmhouse details screen, tapping the pink `Videos` control opens a large video overlay on top of the property-details page.
 
 The resulting video viewer shows the video, progress bar and mute/audio control, but no dedicated close (`X`) or back control inside the video overlay. The white back arrow visible near the top-left belongs to the underlying property-details screen and is visually behind/outside the video overlay rather than part of the video viewer.
 
-The user was unable to exit the video through an obvious in-app control and ultimately used the Android system back/navigation control on the physical phone.
+This was reproduced again while using the physical Motorola Edge 40 directly. The user still could not find an in-viewer back/close affordance and had to rely on Android system navigation to escape.
 
-This is now a **confirmed UX/navigation defect**, not merely a hypothesis from logcat.
+This is a **confirmed UX/navigation defect**.
 
 ### Failure scenario
 
-A user opens a property video, especially on gesture-navigation devices or in a mirrored/remote-control environment, and cannot discover how to dismiss the media viewer. The only reliable escape path observed was Android system navigation.
+A user opens a property video and cannot discover how to dismiss the media viewer. The only reliable escape path observed is Android system navigation. This is especially problematic for users unfamiliar with system gestures and for accessibility/remote-control scenarios.
 
 ### Smallest safe correction
 
@@ -52,17 +52,33 @@ Provide an explicit close/back affordance inside the video viewer overlay itself
 
 **Current severity:** P1/P2 UX candidate because it can effectively trap the user in a media state.
 
-## Finding PD-008 — Apparent video playback lag requires physical-device confirmation
+## Finding PD-008 — Physical-device playback is mostly smooth after startup, but video startup/loading jank is reproducible
 
-Video playback looked severely laggy while the phone was being viewed/controlled through Android Studio device mirroring. That environment can itself degrade or distort video playback/rendering, so this cannot yet be classified as a Stayezy playback-performance bug.
+The same property video was tested directly on the physical Motorola Edge 40 rather than through Android Studio mirroring.
 
-Required confirmation test:
+Observed directly on-device:
 
-1. play the same property video directly on the physical Motorola Edge 40 with Android Studio mirroring disconnected;
-2. observe frame continuity, audio/video sync and responsiveness;
-3. only if lag persists, capture a dedicated logcat/perf trace and inspect ExoPlayer/MediaCodec, network throughput, source bitrate/resolution and surface lifecycle.
+- the cold app/property path still showed noticeable loading/transition lag;
+- opening/starting the video introduced a noticeable loading/startup delay and a small burst of lag as playback began;
+- once playback had started and settled, the video itself was not continuously laggy;
+- the missing in-viewer close/back control remained present on the physical device.
 
-**Status:** unconfirmed pending physical-device-only reproduction.
+This changes the earlier interpretation: the severe continuous lag seen under Android Studio mirroring is not confirmed as an app bug, but **startup/buffering/initial-playback jank is physically reproducible** and therefore belongs to the Stayezy performance investigation.
+
+Potential areas to verify later, without assuming a cause:
+
+- time to first frame and buffering behavior;
+- ExoPlayer/controller initialization lifecycle;
+- whether video controllers/codecs are created too early or recreated unnecessarily;
+- source bitrate/resolution versus device/network conditions;
+- whether the already-observed Map/native-surface pressure remains active during the property/video flow;
+- transition work on the Flutter main isolate.
+
+**Current severity:** P2 performance/UX investigation.
+
+### Measurement note
+
+A later `dumpsys gfxinfo com.cw.stayezy reset` command printed a pre-reset snapshot of 529 frames / 52 janky frames (9.83%), 30 missed vsyncs and 40 slow-UI-thread events. Because `reset` prints the accumulated counters *before* clearing them, those numbers must not be attributed specifically to the new physical-video run without a post-run `gfxinfo` capture. A dedicated post-run capture is required for isolation.
 
 ## Evidence
 
@@ -76,4 +92,4 @@ Committed raw cold-run evidence (gzip-compressed, byte-preserving copies of the 
 - `evidence/module-01-property-details/stayezy-property-details-cold-gfx.txt.gz`
 - `evidence/module-01-property-details/stayezy-property-details-cold-log.txt.gz`
 
-The raw cold log is unusually short and does not contain enough transition detail to attribute the residual lag. The `gfxinfo` snapshot is the stronger quantitative evidence for this run.
+The original raw cold log is unusually short and does not contain enough transition detail to attribute the residual lag. The original `gfxinfo` snapshot is the stronger quantitative evidence for that run.
