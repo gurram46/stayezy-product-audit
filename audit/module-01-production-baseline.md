@@ -69,12 +69,14 @@ Note: Android may leave a task snapshot in Recents after `am force-stop`; that b
 
 ### Finding H-002 — Confirmed startup/main-thread jank
 
-**Evidence:** Android `Choreographer` reported two startup frame-skip bursts:
+**Evidence:** Android `Choreographer` reported startup frame-skip bursts across repeated cold-start tests, including:
 
 - `Skipped 44 frames! The application may be doing too much work on its main thread.`
 - `Skipped 64 frames! The application may be doing too much work on its main thread.`
+- `Skipped 72 frames! The application may be doing too much work on its main thread.`
+- `Skipped 70 frames! The application may be doing too much work on its main thread.` during the later Map-baseline cold start.
 
-At 60 Hz these represent roughly 0.7 s and 1.1 s of missed frame budget respectively. The exact 20–30 second user-perceived lag cannot be attributed solely to these two entries, but the log confirms real main-thread/rendering pressure during startup.
+At 60 Hz these bursts are substantial enough to produce visible jank. The exact 20–30 second user-perceived lag cannot be attributed solely to these entries, but the logs confirm real main-thread/rendering pressure during startup.
 
 **Current severity:** P2 performance/stability investigation.
 
@@ -109,17 +111,37 @@ A third run was captured with the user leaving the Home screen untouched after l
 
 **Interpretation:** this is no longer an interaction-only or screen-recording-only symptom. The rendering surface continues hitting buffer exhaustion while the user is not scrolling or touching the screen. Off-screen Map initialization is now confirmed; whether that platform view is the direct cause of the BLAST failures still requires code-level verification or an A/B build where the Map view is lazily mounted.
 
-### Finding H-004 — Anonymous analytics initialization throws a plugin exception
+#### Map interaction baseline — 16:36 IST
 
-During an anonymous launch, Mixpanel attempts identification with no user ID and logs:
+The anonymous Map flow was tested after another clean restart. The user reported that the first Map visit had a noticeable loading period, zoom/pan was generally smooth once loaded, and a second visit felt faster with only a short loading period around the property-card/bottom-sheet content.
+
+The captured log explains an important part of this behaviour:
+
+- `NewDashboardScreen` becomes active at `16:36:31.979`.
+- Google Maps SDK initialization is already occurring at about `16:36:32.010`.
+- `GoogleMapController` is installed at `16:36:32.065`.
+- The Map property API request starts at `16:36:32.162` — before the later screen-navigation event associated with the user's Map interaction.
+- The Map API returns HTTP 200 at `16:36:33.342`, roughly **1.18 s** after the request.
+- `Map API properties loaded: 300` appears at `16:36:34.367`, roughly **2.21 s** after the request began.
+- The next instrumented screen transition occurs at `16:36:42.420`, more than eight seconds after the 300 Map properties had already been loaded.
+- There is only **one** Map API GET in this capture. The faster second visit therefore appears to be reusing already-loaded state/data rather than performing a second full Map-property fetch.
+- The same BLAST buffer-exhaustion condition is extremely noisy in this capture: **328** `Can't acquire next buffer` entries were counted between approximately `16:36:32.365` and `16:36:43.548`, spanning the background/preload period and the later visible interaction.
+
+**Interpretation:** the Map itself can feel reasonably fast because a significant part of its work is being paid for while the user is still on Home. That is a valid UX trade-off only if intentional and measured. Given the confirmed Home startup jank and buffer pressure, the current preload strategy may be optimizing Map-open latency at the expense of the initial Home experience.
+
+**Do not call this a Map performance bug yet.** The Map interaction itself was mostly smooth after loading. The architectural issue to verify is whether pre-constructing the Google Maps platform view and eagerly fetching 300 properties on Home is justified versus lazily mounting/fetching when the Map tab is first selected, or prefetching only lightweight data without mounting the native platform view.
+
+### Finding H-004 — Anonymous analytics initialization throws plugin exceptions
+
+During anonymous launches, Mixpanel attempts identification with no user ID and logs:
 
 - `Can't identify with null distinct_id.`
 - `java.lang.IllegalStateException: Reply already submitted`
 - `Uncaught exception in binary message listener`
 
-The app continues running, so this is not currently a fatal crash, but it is a real initialization error in the anonymous path.
+The later cold restart also shows Mixpanel `track()`/`flush()` calls hitting a null native `MixpanelAPI` instance around activity/engine teardown/recreation. The app continues running, so these are not currently fatal crashes, but they are real analytics lifecycle/anonymous-path errors.
 
-**Likely correction to verify in code:** do not call user `identify` with a null ID; keep the anonymous/device identity until login, then alias/identify deliberately.
+**Likely correction to verify in code:** do not call user `identify` with a null ID; keep the anonymous/device identity until login, then alias/identify deliberately. Also verify that analytics calls cannot race plugin initialization/disposal during Flutter engine/activity lifecycle changes.
 
 **Current severity:** P2.
 
@@ -128,11 +150,11 @@ The app continues running, so this is not currently a fatal crash, but it is a r
 Observed during the anonymous Home launch:
 
 - Home API call begins with an empty token.
-- Another request (`addPropertyGetData`) takes ~528 ms and returns `{status: false, message: Unauthorized Token}`.
-- Home API timing is ~934 ms / ~952 ms total.
+- Another request (`addPropertyGetData`) returns `{status: false, message: Unauthorized Token}` despite no account being created.
+- Home API timing is roughly 0.9 s in repeated captures.
 - Map API is called immediately and returns 300 properties even though the user is on Home.
 - A duplicate Home API request is detected and skipped (`REQUEST ALREADY PENDING`).
-- GC frees ~25 MB of allocation-space data including ~10 MB of large-object-space objects during startup.
+- Earlier captures show substantial allocation/GC activity during startup.
 
 None of these alone proves the root cause of the visible lag. Together they show that the anonymous dashboard startup is doing substantial network, map, analytics and allocation work that should be profiled and reduced.
 
@@ -140,13 +162,7 @@ None of these alone proves the root cause of the visible lag. Together they show
 
 ### Finding H-006 — Cache accounting looks potentially duplicated
 
-The app logs approximately:
-
-- temporary/cache directory: ~19.94 MB
-- cache: ~19.94 MB
-- support: ~130.8 KB
-- computed `Before`: ~40.01 MB
-- cleanup threshold: 300 MB
+The app logs nearly identical values for its temporary/cache and cache directories. In the latest Map capture, both are reported as about **22.39 MB**, while the computed `Before` total is about **44.90 MB** plus a small support directory.
 
 On Android, temporary/cache paths can resolve to the same underlying cache directory. The near-exact duplication suggests the cleanup accounting may be counting the same cache twice. Verify the actual directory paths in code before treating this as confirmed.
 
@@ -158,7 +174,7 @@ On Android, temporary/cache paths can resolve to the same underlying cache direc
 
 The Play-installed production build logs detailed analytics payloads and runtime data, including device identifiers, analytics identifiers/tokens, an FCM registration token, precise latitude/longitude, API URLs and large API responses.
 
-**Assessment:** release logging should be minimized/redacted. Do not commit the raw clean log to a public repository because it contains device/session-specific values and precise location data.
+**Assessment:** release logging should be minimized/redacted. Do not commit raw logcat captures to a public repository because they contain device/session-specific values and precise location data.
 
 **Current severity:** P2 security/privacy hardening.
 
@@ -166,9 +182,9 @@ The Play-installed production build logs detailed analytics payloads and runtime
 
 1. Inspect the bottom-navigation/dashboard widget tree and verify whether the Map tab/`GoogleMap` is constructed and rendering while Home is active.
 2. Profile startup work on the Flutter main isolate and identify what is executed before/around the `Choreographer` skipped-frame bursts.
-3. Trace anonymous analytics initialization and remove the null Mixpanel `identify` path.
+3. Trace anonymous analytics initialization and remove the null Mixpanel `identify` path; inspect plugin lifecycle around activity/engine recreation.
 4. Identify the anonymous request returning `Unauthorized Token` and avoid making it when unauthenticated if it is not required.
-5. Inspect why 300 map properties are fetched during Home startup and whether the Map module can be lazy-initialized only when the user opens Map.
+5. Inspect why 300 map properties are fetched during Home startup. Compare current eager preload against lazy Map initialization or lightweight data-only prefetching.
 6. Inspect image URL dimensions, response sizes, HTTP cache headers and Flutter image-provider/prefetch strategy for H-001.
 7. Verify cache-directory accounting to ensure temporary/cache directories are not double-counted.
 8. Disable/redact verbose release logs containing FCM token, location, device IDs and full API responses.
@@ -177,7 +193,9 @@ The Play-installed production build logs detailed analytics payloads and runtime
 
 - Baseline app-info/storage screenshots.
 - Home-page screenshots showing delayed image placeholders/listing rails.
+- Map screenshot showing the anonymous Map result/property bottom sheet.
 - `Screen_recording_20260902_160212.mp4`.
 - First broad logcat capture.
 - Clean Stayezy-process logcat capture (`stayezy-home-clean-log.txt`) retained outside the public repo unless redacted.
 - Idle Home Stayezy-process logcat capture (`stayezy-home-idle-log.txt`) retained outside the public repo unless redacted.
+- Map Stayezy-process logcat capture (`stayezy-map-log.txt`) retained outside the public repo unless redacted; it contains device/session/location identifiers and should not be committed raw.
