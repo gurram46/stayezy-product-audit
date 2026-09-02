@@ -1,0 +1,52 @@
+Stayezy Module 01 Search — key evidence
+Date: 2026-09-02
+Device: Motorola Edge 40 / Android 15
+
+Navigation / anonymous path
+19:03:01.292 SearchNew opened from NewDashboardScreen
+19:03:01.293 Token/UserId missing - API not called
+
+Typed query logging
+19:03:05.106 myController >>> m
+19:03:05.284 myController >>> ma
+19:03:05.792 myController >>> mad
+19:03:05.951 myController >>> madh
+19:03:06.290 myController >>> madhp
+19:03:06.832 myController >>> madhpu
+19:03:07.367 myController >>> madhpur
+
+Search loading / response
+19:03:48.733 progressloadingDialog
+19:03:51.332 Response >>> status=true, current_page=1, per_page=20, total=52, total_pages=3, count=2
+Response contains category-aware groups including category_name=Farmhouses, total=51, total_pages=3
+19:03:52.339 data >>> Instance of Getfilter
+Approx progress-start to response: 2.60 s
+Approx progress-start to model/result state: 3.61 s
+
+Pagination-state candidate
+Immediately after server total_pages=3, client repeatedly logs:
+Total properties: 21 | lastPage: 999 | hasMoreData: true
+This line repeats heavily during subsequent rendering/scrolling.
+No page-2/page-3 search request was identified in this capture.
+
+Post-reset gfxinfo (broader search + property browsing session)
+Total frames rendered: 1373
+Janky frames: 151 (11.00%)
+Missed Vsync: 88
+High input latency: 110
+Slow UI thread: 88
+Slow bitmap uploads: 3
+Slow issue draw commands: 57
+Frame deadline missed: 151
+50th percentile: 5 ms
+90th percentile: 12 ms
+95th percentile: 19 ms
+99th percentile: 53 ms
+
+Important measurement caveat
+The 11.00% gfxinfo sample is not Search-only. The captured session continued into multiple property-detail opens and extensive scrolling after search results loaded. Do not attribute the entire jank percentage to Search.
+
+Pre-reset snapshot printed by `dumpsys gfxinfo ... reset`
+Total frames: 1937
+Janky frames: 384 (19.82%)
+This belongs to accumulated activity before reset and is not the isolated post-reset measurement.
