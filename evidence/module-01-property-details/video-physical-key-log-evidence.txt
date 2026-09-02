@@ -1,0 +1,56 @@
+Physical-device video evidence — Motorola Edge 40 / Android 15 / Stayezy 1.1.0
+Captured 2026-09-02, anonymous session.
+
+USER OBSERVATION
+- Video startup/loading showed noticeable lag on the physical phone.
+- Once playback settled, the video was mostly smooth.
+- Viewer still had no dedicated visible close/back control.
+
+KEY LOG TIMELINE
+18:04:02.459  ExoPlayerImpl: Init 4bbc722
+18:04:03.606  MediaCodec: dequeue first output frame
+18:04:11.465  ExoPlayerImpl: Release 4bbc722
+18:04:11.526  ExoPlayerImpl: Init 2f3c732
+18:04:12.462  MediaCodec: dequeue first output frame
+18:04:12.496  PipelineWatcher: pipelineFull: too many frames in pipeline (6)
+18:04:17.112  PipelineWatcher: pipelineFull: too many frames in pipeline (6) [repeated]
+18:04:20.293  ExoPlayerImpl: Release 2f3c732
+18:04:20.349  ExoPlayerImpl: Init d6c6a78
+18:04:21.392  PipelineWatcher: pipelineFull: too many frames in pipeline (6)
+18:04:21.412  MediaCodec: dequeue first output frame
+18:04:25.383  PipelineWatcher: pipelineFull: too many frames in pipeline (6) [repeated]
+18:04:29.253  ExoPlayerImpl: Release d6c6a78
+18:04:29.302  ExoPlayerImpl: Init dc56e8f
+18:04:30.179  MediaCodec: dequeue first output frame
+18:04:30.321  PipelineWatcher: pipelineFull: too many frames in pipeline (6)
+18:04:33.772  PipelineWatcher: pipelineFull: too many frames in pipeline (6) [repeated]
+
+COUNTS FROM THE CAPTURE
+- ExoPlayer init: 4
+- ExoPlayer release: 3
+- PipelineWatcher pipelineFull: 17
+- MediaCodec discarded unknown buffer: 36
+- GraphicsTracker cannot deallocate due to being stopped: 33
+- No FATAL EXCEPTION found
+- No ANR found
+- No explicit ExoPlayer STATE_BUFFERING / buffering log found
+
+INTERPRETATION
+The video clip appears to be short and repeatedly reaches EOS. Instead of maintaining one player and seeking/looping, the observed lifecycle repeatedly releases ExoPlayer and constructs a new one. Each new player takes roughly 0.9–1.15 seconds from Init to first decoded output frame. That lifecycle churn is temporally aligned with the visible startup/restart hitch and repeated pipeline-full / codec-buffer cleanup noise.
+
+This does not prove the exact Flutter source implementation until code is inspected, but it is strong evidence that player/controller recreation is a higher-priority suspect than sustained decode performance or a continuously slow network. Once decoding is established, the AVC decoder outputs roughly 29–32 frames/s for a 30-fps 720x1280 clip in the visible portions of the log.
+
+POST-RUN GFXINFO
+- Total UI frames rendered: 44
+- Janky UI frames: 5 (11.36%)
+- Legacy janky frames: 7 (15.91%)
+- Missed vsync: 3
+- Slow UI thread: 2
+- Frame deadline missed: 5
+- 95th percentile UI frame: 24 ms
+- 99th percentile UI frame: 73 ms
+- Surfaces: 10
+- BufferQueues: 8
+- GraphicBufferAllocator estimate: ~272.6 MB
+
+Caution: gfxinfo measures the Android UI/ViewRoot path and does not represent every video-surface frame. The small 44-frame sample confirms brief UI jank around the tested interaction but should not be read as the video's effective frame rate.
