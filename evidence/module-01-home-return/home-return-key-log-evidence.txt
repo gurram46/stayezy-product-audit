@@ -1,0 +1,43 @@
+Stayezy Module 01 — Home-return capture key evidence
+Date: 2026-09-02
+Device: Motorola Edge 40 / Android 15
+Package: com.cw.stayezy
+Source: stayezy-home-return-log.txt supplied during audit
+
+Important limitation
+--------------------
+The supplied screen recording began around 18:15:52, while this log starts at 18:18:57.505. Therefore this log does NOT contain the exact Home -> property -> Back -> Home interaction visible in the recording and cannot prove whether a Home API request was re-fired on that back navigation.
+
+The log is also overwhelmingly dominated by BLAST surface errors: 1,219 of 1,233 lines (~98.86%) are the same buffer-exhaustion condition. That noise appears to have displaced the Flutter/API-level logs needed to attribute the Home reload behaviour.
+
+Key events
+----------
+18:18:57.505  AppLifecycleState.hidden
+18:18:57.505  AppLifecycleState.inactive
+18:18:57.571  Choreographer: Skipped 30 frames! The application may be doing too much work on its main thread.
+18:18:57.585  MainActivity BLAST/VRI surface constructed
+18:18:57.591  SurfaceView[MainActivity] BLAST surface constructed
+18:18:57.805  AppLifecycleState.resumed
+18:18:58.030  First observed buffer-exhaustion error
+18:20:33.122  Last observed buffer-exhaustion error in capture
+
+Repeated error
+--------------
+BLASTBufferQueue: SurfaceView[com.cw.stayezy/com.cw.stayezy.MainActivity] ...
+Can't acquire next buffer. Already acquired max frames 8 max:6 + 2
+
+Counts / duration
+-----------------
+Total lines: 1,233
+Buffer-exhaustion lines: 1,219 (~98.86%)
+Observed buffer-error span: ~95.09 seconds
+
+Interpretation
+--------------
+1. The persistent native-surface/buffer-pressure problem is reproduced yet again and is strong independent evidence for the existing H-003 investigation.
+2. The user-visible Home skeleton/reload after returning from a property remains a valid behavioural finding based on the recording, but this particular log cannot distinguish among:
+   - a fresh Home API request;
+   - provider/controller reinitialization;
+   - widget-tree reconstruction with cached data;
+   - image-provider/cache rehydration.
+3. A fresh filtered Flutter-only live log is required to determine whether the backend is actually called again during Back navigation.
