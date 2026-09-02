@@ -71,9 +71,9 @@ Committed visual evidence:
 - `evidence/module-01-property-details/001-dreamland-property-details.jpg`
 - `evidence/module-01-property-details/002-video-overlay-no-close-control.jpg`
 
-Additional run evidence captured locally and retained for the audit evidence set:
+Committed raw cold-run evidence (gzip-compressed, byte-preserving copies of the uploaded UTF-16 text files):
 
-- `stayezy-property-details-cold-gfx.txt`
-- `stayezy-property-details-cold-log.txt`
+- `evidence/module-01-property-details/stayezy-property-details-cold-gfx.txt.gz`
+- `evidence/module-01-property-details/stayezy-property-details-cold-log.txt.gz`
 
 The raw cold log is unusually short and does not contain enough transition detail to attribute the residual lag. The `gfxinfo` snapshot is the stronger quantitative evidence for this run.
