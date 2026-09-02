@@ -63,22 +63,67 @@ Observed directly on-device:
 - once playback had started and settled, the video itself was not continuously laggy;
 - the missing in-viewer close/back control remained present on the physical device.
 
-This changes the earlier interpretation: the severe continuous lag seen under Android Studio mirroring is not confirmed as an app bug, but **startup/buffering/initial-playback jank is physically reproducible** and therefore belongs to the Stayezy performance investigation.
-
-Potential areas to verify later, without assuming a cause:
-
-- time to first frame and buffering behavior;
-- ExoPlayer/controller initialization lifecycle;
-- whether video controllers/codecs are created too early or recreated unnecessarily;
-- source bitrate/resolution versus device/network conditions;
-- whether the already-observed Map/native-surface pressure remains active during the property/video flow;
-- transition work on the Flutter main isolate.
+This changes the earlier interpretation: the severe continuous lag seen under Android Studio mirroring is not confirmed as an app bug, but **startup/initial-playback jank is physically reproducible** and therefore belongs to the Stayezy performance investigation.
 
 **Current severity:** P2 performance/UX investigation.
 
 ### Measurement note
 
-A later `dumpsys gfxinfo com.cw.stayezy reset` command printed a pre-reset snapshot of 529 frames / 52 janky frames (9.83%), 30 missed vsyncs and 40 slow-UI-thread events. Because `reset` prints the accumulated counters *before* clearing them, those numbers must not be attributed specifically to the new physical-video run without a post-run `gfxinfo` capture. A dedicated post-run capture is required for isolation.
+A later `dumpsys gfxinfo com.cw.stayezy reset` command printed a pre-reset snapshot of 529 frames / 52 janky frames (9.83%), 30 missed vsyncs and 40 slow-UI-thread events. Because `reset` prints the accumulated counters *before* clearing them, those numbers must not be attributed specifically to the new physical-video run without a post-run `gfxinfo` capture.
+
+## Finding PD-009 — Video loop/restart appears to recreate ExoPlayer instead of reusing the player
+
+The dedicated physical-device capture gives a much stronger explanation for the visible video-start/restart hitch.
+
+Across roughly 31 seconds of video activity, the log shows:
+
+- **4 ExoPlayer initializations**;
+- **3 ExoPlayer releases**;
+- a repeating release → new init → first decoded frame sequence;
+- **17** `PipelineWatcher ... pipelineFull: too many frames in pipeline (6)` events;
+- **36** `MediaCodec discarded an unknown buffer` messages during codec teardown;
+- **33** `GraphicsTracker: cannot deallocate due to being stopped` messages during player/surface cleanup.
+
+Representative lifecycle timings:
+
+- first player: Init `18:04:02.459` → first decoded output `18:04:03.606` ≈ **1.15 s**;
+- second player: Init `18:04:11.526` → first output `18:04:12.462` ≈ **0.94 s**;
+- third player: Init `18:04:20.349` → first output `18:04:21.412` ≈ **1.06 s**;
+- fourth player: Init `18:04:29.302` → first output `18:04:30.179` ≈ **0.88 s**.
+
+The preceding player reaches EOS and is released before the next player is initialized. This strongly suggests the short property video is being looped/restarted by tearing down and recreating the ExoPlayer/controller rather than keeping one player alive and seeking/repeating within the same instance.
+
+That lifecycle is a strong candidate for the visible hitch the user reports when playback begins/restarts. It also explains why sustained playback feels substantially smoother after startup: once the decoder is established, the log shows output around **29–32 frames/s** for a 30-fps 720×1280 AVC stream.
+
+There is no explicit ExoPlayer `STATE_BUFFERING`/buffering event in this capture, so the evidence does **not** currently support blaming the network/CDN as the primary cause. Network behavior should still be measured separately before ruling it out completely.
+
+### Post-run `gfxinfo`
+
+The isolated post-run snapshot reports:
+
+- 44 UI frames rendered;
+- 5 janky frames (**11.36%**);
+- 3 missed-vsync events;
+- 2 slow-UI-thread events;
+- 5 frame-deadline misses;
+- 95th percentile UI frame: 24 ms;
+- 99th percentile UI frame: 73 ms;
+- 10 active surfaces and 8 BufferQueues;
+- ~272.6 MB estimated `GraphicBufferAllocator` allocation at capture time.
+
+The 44-frame sample is small and Android `gfxinfo` measures the ViewRoot/UI path, not every frame rendered by the video surface. Therefore the percentage should be treated as evidence of **brief UI jank around the interaction**, not as the video playback frame rate.
+
+### Code-level verification / smallest likely correction
+
+When source access is available:
+
+1. trace the Flutter video widget/controller lifecycle and confirm what causes a new ExoPlayer instance at each EOS;
+2. if the clip is intended to loop, configure the existing player for repeat/seek-to-start rather than dispose/recreate;
+3. keep controller/player ownership stable across widget rebuilds unless the media source actually changes;
+4. ensure cleanup happens once when the viewer is dismissed, not at every loop boundary;
+5. profile again after the lifecycle fix to verify the pipeline-full and teardown noise falls materially.
+
+**Current severity:** P1/P2 performance candidate because it is repeatedly user-visible and produces avoidable codec/surface churn.
 
 ## Evidence
 
@@ -92,4 +137,8 @@ Committed raw cold-run evidence (gzip-compressed, byte-preserving copies of the 
 - `evidence/module-01-property-details/stayezy-property-details-cold-gfx.txt.gz`
 - `evidence/module-01-property-details/stayezy-property-details-cold-log.txt.gz`
 
-The original raw cold log is unusually short and does not contain enough transition detail to attribute the residual lag. The original `gfxinfo` snapshot is the stronger quantitative evidence for that run.
+Committed filtered physical-video evidence:
+
+- `evidence/module-01-property-details/video-physical-key-log-evidence.txt`
+
+The original raw physical-video files were also supplied during the audit. The filtered evidence file preserves the key timestamps, counts and interpretation needed to reproduce the lifecycle finding without relying on a giant raw-log diff.
