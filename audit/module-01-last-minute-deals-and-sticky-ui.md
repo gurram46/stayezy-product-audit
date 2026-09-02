@@ -97,8 +97,25 @@ Confirmed UI feedback issue. Whether refresh also causes unnecessary network/lis
 
 P3/P2 UX issue, potentially higher if logs confirm duplicated/refetched state causing LMD-001.
 
+## Recovered-capture note
+
+A later attempt to recover the overwritten Last Minute Deals log from Android's ring buffer did not preserve the actual refresh/API interaction. The recovered file contains only a short lifecycle segment around `19:32:20–19:32:24`, so it cannot distinguish client-side append behaviour from a duplicate backend payload.
+
+The corresponding `gfxinfo` snapshot still shows measurable session jank:
+
+- 1,111 frames rendered
+- 113 janky frames (**10.17%**)
+- 101 high-input-latency events
+- 60 slow UI-thread events
+- 65 slow draw-command events
+- 113 missed frame deadlines
+- 95th percentile frame time: 18 ms
+- 99th percentile frame time: 46 ms
+
+These figures cover the broader active session and must not be attributed exclusively to the refresh action. They are consistent with the wider rendering/jank findings already observed across the app.
+
 ## Evidence note
 
 The supplied screenshots visibly capture the duplicate `Aerra Farmstay` cards, conflicting prices, sticky-header/content collisions, floating Chat overlap and Last Minute Deals refresh presentation.
 
-The first Last Minute Deals log capture was accidentally overwritten by starting the same PowerShell redirection command a second time. Because `logcat` itself was not cleared after the interaction, the Android ring buffer may still contain the relevant records; capture with `logcat -d` immediately before clearing/restarting the app.
+The first Last Minute Deals log capture was accidentally overwritten by starting the same PowerShell redirection command a second time. The later ring-buffer recovery did not retain the original refresh records, so source/API inspection will be required to assign root cause for LMD-001 unless the flow is reproduced again in isolation.
